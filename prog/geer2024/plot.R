@@ -26,9 +26,11 @@ library(imputeTS)
 
 # setting -----------------------------------------------------------------
 
-date <- '2403301912'
+aimpsy <- '//SY_3600_01/atfs02/Individual/smori/AIMPSY/output'
+scenario <- 'globalNEAG'
+date <- '2406152336'
 cdir <- getwd()
-ddir <- paste0(cdir,'/data/',date)  # output path
+ddir <- paste0(aimpsy,'/',scenario,'/',date)  # output path
 pdir <- paste0(cdir,'/prog/inc_prog')
 odir <- paste0(cdir,'/output/',date,'/geer2024/main')
 basedir <- 'AIMPSY-master'
@@ -43,9 +45,9 @@ igdx(gams_sys_dir)
 Sys.setlocale("LC_TIME", "en_US.UTF-8")
 
 # define geometry
-geometry_NEA <- st_read(paste0(ddir,'/define/NEA_wo.geojson')) %>% 
+geometry_NEA <- st_read(paste0(cdir,'/define/NEA_wo.geojson')) %>% 
   rename(Sr=N_PSY)
-geometry_NEA_w <- st_read(paste0(ddir,'/define/NEA_w.geojson')) %>% 
+geometry_NEA_w <- st_read(paste0(cdir,'/define/NEA_w.geojson')) %>% 
   transmute(Sr=N_PSY,geometry)
 
 
@@ -53,13 +55,15 @@ geometry_NEA_w <- st_read(paste0(ddir,'/define/NEA_w.geojson')) %>%
 
 # import scenario matrix
 scen_mat_load <- read_csv(paste0(ddir,'/main/scenario_table.csv')) %>% 
-  filter(Scenario%in%c('NoPOL','500C','500C_Elc'))
+  filter(Scenario%in%c('NoPOL','500C','500C_Elc30','500C_Elc35','500C_Elc40'))
 
 # extract infeasible scenario
 scen_inf <- scen_mat_load %>% filter(Status=='Infeasible')
 scen_mat <- scen_mat_load %>% filter(Status!='Infeasible') %>% 
   mutate(Scenario=recode(Scenario,
-                         '500C_Elc'='w/ grid',
+                         '500C_Elc30'='w/ grid (2030)',
+                         '500C_Elc35'='w/ grid (2035)',
+                         '500C_Elc40'='w/ grid',
                          '500C'='w/o grid'),
          scen_tpol=recode(scen_tpol,
                           'NEAG'='w/ grid',
@@ -68,16 +72,20 @@ scen_mat <- scen_mat_load %>% filter(Status!='Infeasible') %>%
 # import AIM/PSY output
 df_all_hr <- rgdx.param(paste0(ddir,'/main/hr/',plot_year,'.gdx'),'data_out_hr') %>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid')) %>% 
-  filter(Sc%in%c('w/o grid','w/ grid','demand+','demand+ w/ grid')) %>% 
+  filter(Sc%in%c('w/o grid','w/ grid')) %>% 
   filter(Sc%in%scen_mat$Scenario) %>% 
   mutate(across(where(is.factor),~as.character(.))) %>%
   rename(value=data_out_hr)
 
 df_all_yr <- rgdx.param(paste0(ddir,'/main/merged_output.gdx'),'data_all_yr') %>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid')) %>% 
   filter(Sc%in%c('w/o grid','w/ grid','demand+','demand+ w/ grid','NoPOL')) %>% 
   mutate(across(where(is.factor),~as.character(.))) %>%
@@ -101,7 +109,7 @@ T <- rgdx.set(paste0(ddir,'/main/hr/2050.gdx'),'St')
 # load modules ------------------------------------------------------------
 
 # import variable definition
-source(paste0(ddir,'/define/var.R'))
+source(paste0(cdir,'/define/var.R'))
 
 # import plot function
 source(paste0(pdir,'/func_analysis.R'))
@@ -165,7 +173,7 @@ g_Fig_1_3 <- df_yr_ele %>%
 plot(g_Fig_1_3)
 
 g_Fig_1_4 <- g_legend(g_Fig_1_3+theme(legend.position='right')+
-                      guides(fill=guide_legend(nrow=2)))
+                        guides(fill=guide_legend(nrow=2)))
 plot(g_Fig_1_4)
 
 g_Fig_1 <- (((g_Fig_1_1 + g_Fig_1_3 + plot_layout(widths=c(1,1)))) / g_Fig_1_4 + plot_layout(heights = c(4,1)))
@@ -224,16 +232,25 @@ df_lnkcap_agg <- df_lnkcap %>%
   reframe(value=sum(value)) %>% 
   mutate(Sv=factor(Sv,levels=c('China/Mongolia','China/Korea','Korea/Japan','China domestic','Japan domestic'))) %>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
-                   '500C'='w/o grid')) %>% 
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
+                   '500C'='w/o grid'),
+         Flag=case_when(str_detect(Sv,'domestic')~'domestic',
+                        !str_detect(Sv,'domestic')~'international')) %>% 
   filter(Sc%in%c('w/o grid','w/ grid'))
 
-g_Fig_2_1 <- df_lnkcap_agg %>%
+g_Fig_2_1_0 <- df_lnkcap_agg %>%
+  mutate(Sv=factor(Sv,levels=c('China domestic',
+                               'Japan domestic',
+                               'China/Mongolia',
+                               'China/Korea',
+                               'Korea/Japan'))) %>% 
   # pivot_wider(names_from=Y5,values_from=value,values_fill=0) %>%
   # pivot_longer(cols=-c(Sc,Sv),names_to='Y5',values_to='value',names_transform=as.numeric) %>% 
   ggplot() +
-  geom_line(aes(x=Y5,y=value/10^6,color=Sv,linetype=Sc),stat='identity',linewidth=0.3) +
-  geom_point(aes(x=Y5,y=value/10^6,color=Sv,shape=Sc)) +
+  geom_line(aes(x=Y5,y=value/10^3,color=Sv,linetype=Sc),stat='identity',linewidth=0.3) +
+  geom_point(aes(x=Y5,y=value/10^3,color=Sv,shape=Sc)) +
   geom_hline(yintercept=0,linewidth=0.2,color='grey60') +
   # scale_color_manual(values=c('China domestic'='#5ea6f2',
   #                            'Japan domestic'='#1a66b8',
@@ -241,18 +258,76 @@ g_Fig_2_1 <- df_lnkcap_agg %>%
   #                            'China/Korea'='#e6a73c',
   #                            'Korea/Japan'='#b85e1a')) +
   scale_color_manual(values=c('China domestic'='#d6982f',
-                             'Japan domestic'='#a14d0e',
-                             'China/Mongolia'='#5ea6f2',
-                             'China/Korea'='#1a66b8',
-                             'Korea/Japan'='grey20')) +
+                              'Japan domestic'='#a14d0e',
+                              'China/Mongolia'='#5ea6f2',
+                              'China/Korea'='#1a66b8',
+                              'Korea/Japan'='grey20')) +
   scale_shape_manual(values=c(1,4)) +
-  labs(x='',y='interconnection capacity (TW)',tag='a)') +
+  labs(x='',y='interconnection capacity (GW)',tag='a)') +
   plot_theme +
-  theme(legend.position='right')
-plot(g_Fig_2_1)
+  theme(legend.position='bottom')
+plot(g_Fig_2_1_0)
+
+g_Fig_2_1_1 <- df_lnkcap_agg %>%
+  filter(Flag=='domestic',Y5>=2015) %>% 
+  # pivot_wider(names_from=Y5,values_from=value,values_fill=0) %>%
+  # pivot_longer(cols=-c(Sc,Sv),names_to='Y5',values_to='value',names_transform=as.numeric) %>% 
+  ggplot() +
+  geom_line(aes(x=Y5,y=value/10^3,color=Sv,linetype=Sc),stat='identity',linewidth=0.3) +
+  geom_point(aes(x=Y5,y=value/10^3,color=Sv,shape=Sc)) +
+  geom_hline(yintercept=0,linewidth=0.2,color='grey60') +
+  # scale_color_manual(values=c('China domestic'='#5ea6f2',
+  #                            'Japan domestic'='#1a66b8',
+  #                            'China/Mongolia'='#fcca3f',
+  #                            'China/Korea'='#e6a73c',
+  #                            'Korea/Japan'='#b85e1a')) +
+  scale_color_manual(values=c('China domestic'='#d6982f',
+                              'Japan domestic'='#a14d0e',
+                              'China/Mongolia'='#5ea6f2',
+                              'China/Korea'='#1a66b8',
+                              'Korea/Japan'='grey20')) +
+  scale_shape_manual(values=c(1,4)) +
+  labs(x='',y='interconnection capacity\n(GW)',tag='a)') +
+  guides(color='none') +
+  plot_theme +
+  theme(legend.position=c(0.7,0.5))
+plot(g_Fig_2_1_1)
+
+g_Fig_2_1_2 <- df_lnkcap_agg %>%
+  filter(Flag=='international') %>% 
+  group_by(Sv,Y5,Flag) %>% 
+  complete(Sc=c('w/ grid','w/o grid'),fill=list(value=0)) %>% 
+  ungroup() %>% 
+  # pivot_wider(names_from=Y5,values_from=value,values_fill=0) %>%
+  # pivot_longer(cols=-c(Sc,Sv),names_to='Y5',values_to='value',names_transform=as.numeric) %>% 
+  ggplot() +
+  geom_hline(yintercept=0,linewidth=0.2,color='grey60') +
+  geom_line(aes(x=Y5,y=value/10^3,color=Sv,linetype=Sc),stat='identity',linewidth=0.3) +
+  geom_point(aes(x=Y5,y=value/10^3,color=Sv,shape=Sc)) +
+  # scale_color_manual(values=c('China domestic'='#5ea6f2',
+  #                            'Japan domestic'='#1a66b8',
+  #                            'China/Mongolia'='#fcca3f',
+  #                            'China/Korea'='#e6a73c',
+  #                            'Korea/Japan'='#b85e1a')) +
+  scale_color_manual(values=c('China domestic'='#d6982f',
+                              'Japan domestic'='#a14d0e',
+                              'China/Mongolia'='#5ea6f2',
+                              'China/Korea'='#1a66b8',
+                              'Korea/Japan'='grey20')) +
+  scale_shape_manual(values=c(1,4)) +
+  scale_x_continuous(n.breaks=3) +
+  labs(x='',y='',tag='') +
+  plot_theme +
+  theme(legend.position='none')
+plot(g_Fig_2_1_2)
+
+g_Fig_2_1 <- ((g_Fig_2_1_1 + g_Fig_2_1_2 + plot_layout(width=c(2,1))) /
+  g_legend(g_Fig_2_1_0+guides(color=guide_legend(nrow=2),linetype='none',shape='none'))) +
+  plot_layout(heights = c(8,1))
+
 
 ggsave(filename=paste0(odir,'/Fig2_1.png'),g_Fig_2_1,
-       width=4,height=2.75)
+       width=4,height=3.25)
 
 
 # storage capacity --------------------------------------------------------
@@ -279,7 +354,9 @@ df_stocap <- foreach (i=scen_mat_load$Scenario) %do% {
   group_by(Sc,Sr,Sr2,Sv,Y5) %>% 
   reframe(value=mean(value)) %>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid')) %>% 
   filter(Sc%in%c('w/ grid','w/o grid'))
 
@@ -327,7 +404,7 @@ t_2 <- g_Fig_2_2 <- bind_rows(df_stocap,df_stocap_total) %>%
 
 Sys.setlocale("LC_TIME", "en_GB.UTF-8")
 
-df_flw_exp <- foreach (i=c('500C_Elc')) %do% {
+df_flw_exp <- foreach (i=c('500C_Elc40')) %do% {
   tmp0 <- rgdx.param(paste0(ddir,'/gams_output/gdx_secondary/prm2sec/',i,'.gdx'),'prm2sec_flw_snd') %>%
     filter(YEAR==plot_year) %>% 
     mutate(across(where(is.factor),~as.character(.))) %>%
@@ -354,10 +431,10 @@ df_flw_exp <- foreach (i=c('500C_Elc')) %do% {
   summary <- bind_rows(tmp %>% filter(value>0),
                        tmp %>% filter(value<0) %>% transmute(Sc,tmp=N0,N0=N1,N1=tmp,Sy,St,value) %>% select(-tmp))
 } %>% bind_rows() %>% 
-  mutate(Sc=recode(Sc,'500C_Elc'='default w/ grid')) %>% 
+  mutate(Sc=recode(Sc,'500C_Elc40'='default w/ grid')) %>% 
   filter(Sc%in%c('default w/ grid')) 
 
-df_flw_imp <- foreach (i=c('500C_Elc')) %do% {
+df_flw_imp <- foreach (i=c('500C_Elc40')) %do% {
   tmp0 <- rgdx.param(paste0(ddir,'/gams_output/gdx_secondary/prm2sec/',i,'.gdx'),'prm2sec_flw_rec') %>%
     filter(YEAR==plot_year) %>% 
     mutate(across(where(is.factor),~as.character(.))) %>%
@@ -384,7 +461,7 @@ df_flw_imp <- foreach (i=c('500C_Elc')) %do% {
   summary <- bind_rows(tmp %>% filter(value>0),
                        tmp %>% filter(value<0) %>% transmute(Sc,tmp=N0,N0=N1,N1=tmp,Sy,St,value) %>% select(-tmp))
 } %>% bind_rows() %>% 
-  mutate(Sc=recode(Sc,'500C_Elc'='default w/ grid')) %>% 
+  mutate(Sc=recode(Sc,'500C_Elc40'='default w/ grid')) %>% 
   filter(Sc%in%c('default w/ grid')) 
 
 df_flw_exp_annual <- bind_rows(df_flw_exp %>% filter(value>0),
@@ -421,7 +498,7 @@ df_flw_annual_net <- df_flw_annual %>%
   pivot_wider(names_from=Sv,values_from=value) %>% 
   transmute(Sc,Sr,value=export+import)
 
-dmd <- foreach (i=c('500C_Elc')) %do% {
+dmd <- foreach (i=c('500C_Elc40')) %do% {
   tmp <- rgdx.param(paste0(ddir,'/gams_output/gdx_primary/',i,'/2050.gdx'),'dmd') %>% 
     filter(I%in%c('AC2','H2')) %>% 
     mutate(Sr=case_when(str_detect(N,'JP-')~'JPN',
@@ -433,7 +510,7 @@ dmd <- foreach (i=c('500C_Elc')) %do% {
     group_by(Sr) %>% reframe(dmd=sum(dmd)) %>% 
     mutate(Sc=i)
 } %>% bind_rows() %>% 
-  mutate(Sc=recode(Sc,'500C_Elc'='default w/ grid'))
+  mutate(Sc=recode(Sc,'500C_Elc40'='default w/ grid'))
 
 # heat map
 df_flw_heat <- df_flw_exp %>% 
@@ -485,7 +562,7 @@ t_3_3 <- df_flw_heat %>%
   group_by(Sc,Sv) %>% 
   reframe(value=sum(value))
 
-  
+
 
 # Japan generation mix ----------------------------------------------------
 
@@ -516,7 +593,7 @@ g_Fig_4_2 <- df_yr_ele %>%
   ggplot() +
   geom_bar(aes(x=Sc,y=value/10^6,fill=Sv),stat='identity') +
   scale_fill_manual(values=plt$Color,labels=plt$Legend)+
-  labs(x='',y='power generation in 2050 (TWh/yr)') +
+  labs(x='',y='power generation in 2050\n(TWh/yr)') +
   facet_wrap(vars(Sr),nrow=1) +
   theme(legend.position='none',
         axis.title.y=element_blank(),
@@ -536,7 +613,7 @@ ggsave(filename=paste0(odir,'/Fig_4.png'),g_Fig_4,
        width=10,height=4)
 
 ggsave(filename=paste0(odir,'/Fig_4.png'),g_Fig_4_2+theme(legend.position='bottom')+guides(fill=guide_legend(nrow=5)),
-       width=5,height=4.5)
+       width=5,height=4.25)
 
 
 # interconnetion capacity -------------------------------------------------
@@ -550,7 +627,9 @@ df_lnkcap_agg <- df_lnkcap %>%
 
 g_Fig_5 <- df_lnkcap_agg %>%
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid')) %>% 
   filter(Sc%in%c('w/ grid','w/o grid'),
          Y5>=2020) %>% 
@@ -570,17 +649,17 @@ g_Fig_5 <- df_lnkcap_agg %>%
   ggplot() +
   geom_line(aes(x=Y5,y=value/1000,linetype=Sc),linewidth=0.3) +
   geom_point(aes(x=Y5,y=value/1000,shape=Sc)) +
-  labs(x='',y='interconnection capacity (GW)') +
+  labs(x='',y='interconnection capacity\n(GW)') +
   scale_color_d3() +
   facet_wrap(vars(Sv),nrow=1) +
   # scale_color_manual(values=c('orchid','#F6CCFFFF','#b85e1a','#fcca3f','#ACBF4C','#5ea6f2','#1a66b8','#0D2570','grey50')) +
   scale_shape_manual(values=c(1,4)) +
   plot_theme +
-    theme(legend.position=c(0.95,0.7),
+  theme(legend.position=c(0.95,0.7),
         strip.text.x = element_text(size=9))
 plot(g_Fig_5)
 ggsave(filename=paste0(odir,'/Fig_5.png'),g_Fig_5+labs(tag='b)'),
-       width=8.5,height=2.75)
+       width=8.5,height=2.25)
 
 
 # daily balance -----------------------------------------------------------
@@ -721,7 +800,7 @@ ggsave(filename=paste0(odir,'/Fig_6.png'),g_Fig_6_0+labs(y='electricity balance\
 
 # marginal electricity price ----------------------------------------------
 
-df_mcoe <- foreach (i=c('500C','500C_Elc')) %do% {
+df_mcoe <- foreach (i=c('500C','500C_Elc40')) %do% {
   eq_npb_m_AC <- rgdx.param(paste0(ddir,'/gams_output/gdx_primary/',i,'/2050.gdx'),'eq_npb_m') %>% 
     filter(MT!='ANN',I=='AC') %>% rename(T=MT) %>% select(-I)
   eq_npb_m_AC2 <- rgdx.param(paste0(ddir,'/gams_output/gdx_primary/',i,'/2050.gdx'),'eq_npb_m') %>% 
@@ -738,7 +817,9 @@ df_mcoe_JPN <- df_mcoe %>%
   group_by(Sc,I,T) %>% 
   reframe(value=sum(dmd*eq_npb_m)/sum(dmd)) %>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid'))
 
 df_mcoe_ann <- df_mcoe %>% 
@@ -749,14 +830,18 @@ df_mcoe_ann <- df_mcoe %>%
   group_by(Sr,Sc,I) %>% 
   reframe(value=sum(dmd*eq_npb_m)/sum(dmd))%>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid'))
 
 df_mcoe_ann_total <- df_mcoe %>% 
   group_by(Sc,I) %>% 
   reframe(value=sum(dmd*eq_npb_m)/sum(dmd))%>% 
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
                    '500C'='w/o grid')) %>% 
   mutate(Sr='Total')
 
@@ -784,7 +869,7 @@ g_Fig_7_1 <- bind_rows(df_mcoe_ann,df_mcoe_ann_total) %>%
   labs(y='Averagearginal cost of electricity (USD/kWh)') +
   scale_shape_manual(values=c(1,4)) +
   scale_y_continuous(limits=c(0,NA)) +
-  labs(x='',y='Annual average of MCOE (USD/kWh)',tag='a)') +
+  labs(x='',y='Annual average of MCOE\n(USD/kWh)',tag='a)') +
   plot_theme +
   theme(legend.position=c(0.75,0.25),
         legend.text=element_text(size=10))
@@ -832,7 +917,7 @@ gen_inv_map <- tribble(~R,~Sv,
                        'CCGT_CCS','CAPEX (fossil w/ CCS)',
                        'OIL','CAPEX (fossil w/o CCS)')
 
-df_gensto_sys <- foreach (i=c('500C','500C_Elc','NoPOL')) %do% {
+df_gensto_sys <- foreach (i=c('500C','500C_Elc30','500C_Elc35','500C_Elc40','NoPOL')) %do% {
   gen_inv <- rgdx.param(paste0(ddir,'/gams_output/gdx_secondary/prm2sec/',i,'.gdx'),'prm2sec_gen_inv2') %>% 
     filter(SE0=='ALL') %>% select(-SE0) %>% 
     left_join(gen_inv_map) %>% 
@@ -869,7 +954,7 @@ df_gensto_sys <- foreach (i=c('500C','500C_Elc','NoPOL')) %do% {
 } %>% bind_rows()
 
 
-df_lnk_sys <- foreach (i=c('500C','500C_Elc','NoPOL')) %do% {
+df_lnk_sys <- foreach (i=c('500C','500C_Elc30','500C_Elc35','500C_Elc40','NoPOL')) %do% {
   lnk_inv <- rgdx.param(paste0(ddir,'/gams_output/gdx_secondary/prm2sec/',i,'.gdx'),'prm2sec_lnk_inv2') %>% 
     separate(L,sep='_',into=c('N0','N1'),remove=FALSE) %>% 
     mutate(N0=str_remove_all(N0,'-AC$|-DC$|-H2$|-PHS$|-AC2$'),
@@ -905,30 +990,60 @@ df_lnk_sys <- foreach (i=c('500C','500C_Elc','NoPOL')) %do% {
     mutate(Sc=i)
 } %>% bind_rows()
 
-df_sys <- bind_rows(df_gensto_sys,df_lnk_sys) %>% 
-  mutate(across(where(is.factor),~as.character(.))) %>% mutate(YEAR=as.numeric(YEAR)) %>% 
+df_sys <- bind_rows(df_gensto_sys,df_lnk_sys) %>%
+  mutate(across(where(is.factor),~as.character(.))) %>% mutate(YEAR=as.numeric(YEAR)) %>%
   mutate(Sr2=case_when(str_detect(N,'JP-')~'JPN',
                        str_detect(N,'CN-')~'CHN',
                        str_detect(N,'KR')~'KOR',
-                       str_detect(N,'MN')~'MNG')) %>% 
-  filter(YEAR>=2020) %>% 
+                       str_detect(N,'MN')~'MNG')) %>%
+  filter(YEAR>=2020) %>%
   group_by(Sr2,Sc,Sv,YEAR) %>%
-  reframe(value=sum(value)) %>% 
-  group_by(Sr2,Sc,Sv) %>% 
-  complete(YEAR=seq(2020,2050,5)) %>% 
-  replace_na(list(value=0)) %>% 
-  complete(YEAR=2020:2050) %>% 
-  mutate(value=na_locf(value,option='nocb')) %>% 
-  pivot_wider(names_from=Sc,values_from=value,values_fill=0) %>% 
-  mutate(across(c(`500C`,`500C_Elc`),~.-`NoPOL`)) %>%
-  pivot_longer(cols=-c(Sv,Sr2,YEAR),names_to='Sc',values_to='value') %>% 
-  mutate(discount=(1-0.05)^(YEAR-2020)) %>% 
+  reframe(value=sum(value)) %>%
+  group_by(Sr2,Sc,Sv) %>%
+  complete(YEAR=seq(2020,2050,5)) %>%
+  replace_na(list(value=0)) %>%
+  complete(YEAR=2020:2050) %>%
+  mutate(value=na_locf(value,option='nocb')) %>%
+  pivot_wider(names_from=Sc,values_from=value,values_fill=0) %>%
+  mutate(across(c(`500C`,`500C_Elc30`,`500C_Elc35`,`500C_Elc40`),~.-`NoPOL`)) %>%
+  pivot_longer(cols=-c(Sv,Sr2,YEAR),names_to='Sc',values_to='value') %>%
+  mutate(discount=(1-0.05)^(YEAR-2020)) %>%
   filter(Sc!='NoPOL') %>%
-  group_by(Sc,Sv,Sr2) %>% 
-  reframe(value=sum(value*discount)) %>% 
+  group_by(Sc,Sv,Sr2) %>%
+  reframe(value=sum(value*discount)) %>%
   mutate(Sc=recode(Sc,
-                   '500C_Elc'='w/ grid',
-                   '500C'='w/o grid')) %>% 
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
+                   '500C'='w/o grid')) %>%
+  filter(Sc%in%c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)'))
+
+df_sys4050 <- bind_rows(df_gensto_sys,df_lnk_sys) %>%
+  mutate(across(where(is.factor),~as.character(.))) %>% mutate(YEAR=as.numeric(YEAR)) %>%
+  mutate(Sr2=case_when(str_detect(N,'JP-')~'JPN',
+                       str_detect(N,'CN-')~'CHN',
+                       str_detect(N,'KR')~'KOR',
+                       str_detect(N,'MN')~'MNG')) %>%
+  filter(YEAR>=2040) %>%
+  group_by(Sr2,Sc,Sv,YEAR) %>%
+  reframe(value=sum(value)) %>%
+  group_by(Sr2,Sc,Sv) %>%
+  complete(YEAR=seq(2040,2050,5)) %>%
+  replace_na(list(value=0)) %>%
+  complete(YEAR=2040:2050) %>%
+  mutate(value=na_locf(value,option='nocb')) %>%
+  pivot_wider(names_from=Sc,values_from=value,values_fill=0) %>%
+  mutate(across(c(`500C`,`500C_Elc40`),~.-`NoPOL`)) %>%
+  pivot_longer(cols=-c(Sv,Sr2,YEAR),names_to='Sc',values_to='value') %>%
+  mutate(discount=(1-0.05)^(YEAR-2020)) %>%
+  filter(Sc!='NoPOL') %>%
+  group_by(Sc,Sv,Sr2) %>%
+  reframe(value=sum(value*discount)) %>%
+  mutate(Sc=recode(Sc,
+                   '500C_Elc30'='w/ grid (2030)',
+                   '500C_Elc35'='w/ grid (2035)',
+                   '500C_Elc40'='w/ grid',
+                   '500C'='w/o grid')) %>%
   filter(Sc%in%c('w/o grid','w/ grid'))
 
 
@@ -941,15 +1056,35 @@ df_sys_total <- bind_rows(df_sys,df_sys_nea) %>%
   group_by(Sc,Sr2) %>% 
   reframe(value=sum(value))
 
-df_GDP_country <- read_csv(paste0(ddir,'/define/GDP_SSP2_v3.csv')) %>% 
-  mutate(Sr2=recode(Region,'China'='CHN','Japan'='JPN','South Korea'='KOR','Mongolia'='MNG')) %>% 
-  select(-Model,-Scenario,-Region,-Variable,-Unit) %>% 
-  pivot_longer(cols=-c(Sr2),names_to='YEAR',values_to='GDP',names_transform=as.numeric) %>% 
-  group_by(Sr2) %>% 
-  complete(YEAR=2020:2050) %>% 
-  mutate(GDP=na_interpolation(GDP)) %>% 
-  mutate(discount=(1-0.05)^(YEAR-2020)) %>% 
-  group_by(Sr2) %>% 
+df_sys_nea4050 <- df_sys4050 %>%
+  group_by(Sc,Sv) %>% 
+  reframe(value=sum(value)) %>% 
+  mutate(Sr2='Total')
+
+df_sys_total4050 <- bind_rows(df_sys4050,df_sys_nea4050) %>%
+  group_by(Sc,Sr2) %>% 
+  reframe(value=sum(value))
+
+df_GDP_country <- read_csv(paste0(cdir,'/define/GDP_SSP2_v3.csv')) %>%
+  mutate(Sr2=recode(Region,'China'='CHN','Japan'='JPN','South Korea'='KOR','Mongolia'='MNG')) %>%
+  select(-Model,-Scenario,-Region,-Variable,-Unit) %>%
+  pivot_longer(cols=-c(Sr2),names_to='YEAR',values_to='GDP',names_transform=as.numeric) %>%
+  group_by(Sr2) %>%
+  complete(YEAR=2020:2050) %>%
+  mutate(GDP=na_interpolation(GDP)) %>%
+  mutate(discount=(1-0.05)^(YEAR-2020)) %>%
+  group_by(Sr2) %>%
+  reframe(GDP=sum(GDP*discount)*10^9*91.9/102.9)
+
+df_GDP_country4050 <- read_csv(paste0(cdir,'/define/GDP_SSP2_v3.csv')) %>%
+  mutate(Sr2=recode(Region,'China'='CHN','Japan'='JPN','South Korea'='KOR','Mongolia'='MNG')) %>%
+  select(-Model,-Scenario,-Region,-Variable,-Unit) %>%
+  pivot_longer(cols=-c(Sr2),names_to='YEAR',values_to='GDP',names_transform=as.numeric) %>%
+  group_by(Sr2) %>%
+  complete(YEAR=2040:2050) %>%
+  mutate(GDP=na_interpolation(GDP)) %>%
+  mutate(discount=(1-0.05)^(YEAR-2020)) %>%
+  group_by(Sr2) %>%
   reframe(GDP=sum(GDP*discount)*10^9*91.9/102.9)
 
 df_GDP_nea <- df_GDP_country %>% 
@@ -957,6 +1092,12 @@ df_GDP_nea <- df_GDP_country %>%
   mutate(Sr2='Total')
 
 df_GDP <- bind_rows(df_GDP_country,df_GDP_nea)
+
+df_GDP_nea4050 <- df_GDP_country4050 %>% 
+  reframe(GDP=sum(GDP)) %>% 
+  mutate(Sr2='Total')
+
+df_GDP4050 <- bind_rows(df_GDP_country4050,df_GDP_nea4050)
 
 plt <- set_plot(ele_inv2)
 
@@ -967,7 +1108,7 @@ g_Fig_7 <- bind_rows(df_sys,df_sys_nea) %>%
                       str_detect(Sv,'solar|wind')~'CAPEX (solar/wind)',
                       TRUE~Sv)) %>%
   mutate(Sv=factor(Sv,levels=rev(ele_inv2$Variable)),
-         Sc=factor(Sc,levels=c('w/o grid','w/ grid')),
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)')),
          Sr2=factor(Sr2,levels=c('JPN','CHN','KOR','MNG','Total'))) %>%
   ggplot() +
   geom_bar(aes(x=Sc,y=value,fill=Sv),stat='identity') +
@@ -982,6 +1123,26 @@ g_Fig_7 <- bind_rows(df_sys,df_sys_nea) %>%
   plot_theme +
   theme(legend.position = 'bottom')
 plot(g_Fig_7)
+
+t_7_1 <- bind_rows(df_sys,df_sys_nea) %>%
+  left_join(df_GDP) %>%
+  mutate(value=value/GDP*100,
+         Sv=case_when(str_detect(Sv,'fossil')~'CAPEX (fossil)',
+                      str_detect(Sv,'solar|wind')~'CAPEX (solar/wind)',
+                      TRUE~Sv)) %>%
+  mutate(Sv=factor(Sv,levels=rev(ele_inv2$Variable)),
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)')),
+         Sr2=factor(Sr2,levels=c('JPN','CHN','KOR','MNG','Total')))
+
+t_7_2 <- bind_rows(df_sys4050,df_sys_nea4050) %>%
+  left_join(df_GDP4050) %>%
+  mutate(value=value/GDP*100,
+         Sv=case_when(str_detect(Sv,'fossil')~'CAPEX (fossil)',
+                      str_detect(Sv,'solar|wind')~'CAPEX (solar/wind)',
+                      TRUE~Sv)) %>%
+  mutate(Sv=factor(Sv,levels=rev(ele_inv2$Variable)),
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)')),
+         Sr2=factor(Sr2,levels=c('JPN','CHN','KOR','MNG','Total')))
 # ggsave(filename=paste0(odir,'/Fig_7.png'),g_Fig_7,width=4,height=5.5)
 
 # g_Fig_7_3 <- df_sys_total %>%
@@ -1002,11 +1163,117 @@ df <- df_sys_total %>%
   left_join(df_GDP) %>%
   filter(Sr2=='Total') %>% 
   mutate(value2=value/GDP*100,
-         Sc=factor(Sc,levels=c('w/o grid','w/ grid'))) 
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)')),
+         Sc2=case_when(Sc=='w/o grid'~'w/o grid',
+                       Sc=='w/ grid'~'2040',
+                       Sc=='w/ grid (2030)'~'2030',
+                       Sc=='w/ grid (2035)'~'2035')) 
+
+df4050 <- df_sys_total4050 %>% 
+  left_join(df_GDP4050) %>%
+  filter(Sr2=='Total') %>% 
+  mutate(value2=value/GDP*100,
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)')),
+         Sc2=case_when(Sc=='w/o grid'~'w/o grid',
+                       Sc=='w/ grid'~'2040',
+                       Sc=='w/ grid (2030)'~'2030',
+                       Sc=='w/ grid (2035)'~'2035')) 
+
+df <- df_sys_total %>% 
+  left_join(df_GDP) %>%
+  filter(Sr2=='Total') %>% 
+  mutate(value2=value/GDP*100,
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid (2030)','w/ grid (2035)')),
+         Sc2=case_when(Sc=='w/o grid'~'w/o grid',
+                       Sc=='w/ grid'~'2040',
+                       Sc=='w/ grid (2030)'~'2030',
+                       Sc=='w/ grid (2035)'~'2035')) 
 
 g_Fig_7_3 <- df %>%
   ggplot() +
-  geom_bar(aes(x=Sc,y=value/10^12),color='grey30',stat='identity') +
+  geom_bar(data=. %>% filter(Sc%in%c('w/o grid','w/ grid','w/ grid (2030)')) %>% 
+             mutate(Sc=case_when(Sc2=='2030'~'w/ grid\n(2030)',TRUE~Sc)) %>% 
+             mutate(Sc=factor(Sc,levels=c('w/o grid','w/ grid','w/ grid\n(2030)'))),aes(x=Sc,y=value/10^12),color='grey30',stat='identity') +
+  # geom_point(data=. %>% filter(Sc!='w/o grid',Sc!='w/ grid (2035)') %>% 
+  #              mutate(Sc=case_when(Sc2%in%c('2030','2035')~'w/ grid',TRUE~Sc)),aes(x=Sc,y=value/10^12,shape=Sc2),fill='white') +
+  scale_shape_manual(values=c(24,21)) +
+  scale_y_continuous(name='Cumulative additional\nsystem cost (trillion USD)',
+                     sec.axis=sec_axis(~.*10^12/df$GDP*100,name='Cumulative additional\nsystem cost (% of GDP)')) +
+  plot_theme +
+  theme(legend.position = 'right',
+        legend.text=element_text(size=10)) +
+  labs(x='',tag='c)')
+plot(g_Fig_7_3)
+
+g_Fig_7 <- g_Fig_7_1 + g_Fig_7_2 + g_Fig_7_3 + plot_layout(nrow=1,widths=c(2,3.5,1.5))
+plot(g_Fig_7)
+
+ggsave(filename=paste0(odir,'/Fig_7.png'),g_Fig_7,width=9,height=3.25)
+
+check <- df_da_ele %>% 
+  filter(Sv%in%c('Sec_Ene_Ele_Sto_Cha_Gro_PHS'))
+
+df_sys2 <- bind_rows(df_gensto_sys,df_lnk_sys) %>% 
+  mutate(across(where(is.factor),~as.character(.))) %>% mutate(YEAR=as.numeric(YEAR)) %>% 
+  mutate(Sr2=case_when(str_detect(N,'JP-')~'JPN',
+                       str_detect(N,'CN-')~'CHN',
+                       str_detect(N,'KR')~'KOR',
+                       str_detect(N,'MN')~'MNG')) %>% 
+  filter(YEAR>=2020) %>% 
+  group_by(Sr2,Sc,Sv,YEAR) %>%
+  reframe(value=sum(value)) %>% 
+  group_by(Sr2,Sc,Sv) %>% 
+  complete(YEAR=seq(2020,2050,5)) %>% 
+  replace_na(list(value=0)) %>% 
+  complete(YEAR=2020:2050) %>% 
+  mutate(value=na_locf(value,option='nocb')) %>% 
+  pivot_wider(names_from=Sc,values_from=value,values_fill=0) %>% 
+  mutate(across(c(`500C`,`500C_Elc40`),~.-`NoPOL`)) %>%
+  pivot_longer(cols=-c(Sv,Sr2,YEAR),names_to='Sc',values_to='value') %>% 
+  mutate(discount=(1-0.05)^(YEAR-2020)) %>% 
+  filter(Sc!='NoPOL') %>%
+  group_by(Sc,YEAR,Sr2) %>% 
+  reframe(value=sum(value*discount)) %>% 
+  mutate(Sc=recode(Sc,
+                   '500C_Elc40'='w/ grid',
+                   '500C'='w/o grid')) %>% 
+  filter(Sc%in%c('w/o grid','w/ grid'))
+
+df_sys_nea2 <- df_sys2 %>%
+  group_by(Sc,YEAR) %>% 
+  reframe(value=sum(value)) %>% 
+  mutate(Sr2='Total')
+
+df_GDP2 <- read_csv(paste0(cdir,'/define/GDP_SSP2_v3.csv')) %>% 
+  mutate(Sr2=recode(Region,'China'='CHN','Japan'='JPN','South Korea'='KOR','Mongolia'='MNG')) %>% 
+  select(-Model,-Scenario,-Region,-Variable,-Unit) %>% 
+  pivot_longer(cols=-c(Sr2),names_to='YEAR',values_to='GDP',names_transform=as.numeric) %>% 
+  group_by(Sr2) %>% 
+  complete(YEAR=2020:2050) %>% 
+  mutate(GDP=na_interpolation(GDP)) %>% 
+  mutate(discount=(1-0.05)^(YEAR-2020)) %>% 
+  filter(YEAR%in%c(2021:2050)) %>% 
+  mutate(Y10=case_when(YEAR%in%c(2021:2030)~'2021-30',
+                       YEAR%in%c(2031:2040)~'2031-40',
+                       YEAR%in%c(2041:2050)~'2031-50')) %>% 
+  group_by(Y10) %>% 
+  reframe(GDP=sum(GDP*discount)*10^9*91.9/102.9)
+
+df_sys_total2 <- bind_rows(df_sys2,df_sys_nea2) %>%
+  filter(Sr2=='Total') %>% 
+  filter(YEAR%in%c(2021:2050)) %>% 
+  mutate(Y10=case_when(YEAR%in%c(2021:2030)~'2021-30',
+                       YEAR%in%c(2031:2040)~'2031-40',
+                       YEAR%in%c(2041:2050)~'2031-50')) %>% 
+  group_by(Sc,Y10) %>% 
+  reframe(value=sum(value)) %>% 
+  left_join(df_GDP2) %>%
+  mutate(value2=value/GDP*100,
+         Sc=factor(Sc,levels=c('w/o grid','w/ grid')))
+
+g_Fig_7_3 <- df_sys_total2 %>%
+  ggplot() +
+  geom_bar(aes(x=Sc,y=value/10^12,fill=Y10),stat='identity') +
   scale_shape_manual(values=c(1,4)) +
   scale_y_continuous(name='Cumulative additional system cost\n(trillion USD)',
                      sec.axis=sec_axis(~.*10^12/df$GDP*100,name='Cumulative additional system cost\n(% of GDP)')) +
@@ -1016,21 +1283,13 @@ g_Fig_7_3 <- df %>%
   labs(x='',tag='c)')
 plot(g_Fig_7_3)
 
-g_Fig_7 <- g_Fig_7_1 + g_Fig_7_2 + g_Fig_7_3 + plot_layout(nrow=1,widths=c(2,4,1))
-plot(g_Fig_7)
-
-ggsave(filename=paste0(odir,'/Fig_7.png'),g_Fig_7,width=9,height=3.5)
-
-check <- df_da_ele %>% 
-  filter(Sv%in%c('Sec_Ene_Ele_Sto_Cha_Gro_PHS'))
-
 t_7 <- df
 
 
 # input data --------------------------------------------------------------
 
 
-dmda_t <- foreach (i=c('500C','500C_Elc','NoPOL')) %do% {
+dmda_t <- foreach (i=c('500C','500C_Elc40','NoPOL')) %do% {
   dmda_t <- rgdx.param(paste0(ddir,'/input/',i,'.gdx'),'dmda_t') %>% 
     mutate(Sc=i)
 } %>% bind_rows() %>% 
@@ -1063,7 +1322,7 @@ g_3_1 <- dmda_t %>%
   plot_theme +
   theme(legend.position='none',plot.tag=element_text(size=10)) +
   labs(tag='b)')
-  plot(g_3_1)
+plot(g_3_1)
 
 qmax_t <- foreach (i=c('500C')) %do% {
   qmax_t <- rgdx.param(paste0(ddir,'/input/',i,'.gdx'),'qmax_t') %>% 
